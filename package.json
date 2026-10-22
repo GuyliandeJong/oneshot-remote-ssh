@@ -1,15 +1,18 @@
 {
-	"name": "open-remote-ssh",
-	"displayName": "Open Remote - SSH",
-	"description": "Use any remote machine with a SSH server as your development environment.",
-	"version": "0.5.0",
-	"publisher": "jeanp413",
+	"name": "oneshot-remote-ssh",
+	"displayName": "OneShot Remote SSH",
+	"description": "Remote development over SSH that runs server setup in a single SSH command: one MFA prompt (e.g. Duo login_duo) per connection. Fork of Open Remote - SSH.",
+	"version": "1.0.0",
+	"publisher": "guyliandejong",
+	"author": {
+		"name": "Guylian de Jong"
+	},
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/jeanp413/open-remote-ssh.git"
+		"url": "https://github.com/GuyliandeJong/oneshot-remote-ssh.git"
 	},
 	"bugs": {
-		"url": "https://github.com/jeanp413/open-remote-ssh/issues"
+		"url": "https://github.com/GuyliandeJong/oneshot-remote-ssh/issues"
 	},
 	"engines": {
 		"vscode": "^1.70.2"
@@ -95,16 +98,16 @@
 		"yaml": "2.9.1"
 	},
 	"activationEvents": [
-		"onCommand:openremotessh.openEmptyWindow",
-		"onCommand:openremotessh.openEmptyWindowInCurrentWindow",
-		"onCommand:openremotessh.openConfigFile",
-		"onCommand:openremotessh.showLog",
+		"onCommand:oneshotssh.openEmptyWindow",
+		"onCommand:oneshotssh.openEmptyWindowInCurrentWindow",
+		"onCommand:oneshotssh.openConfigFile",
+		"onCommand:oneshotssh.showLog",
 		"onResolveRemoteAuthority:ssh-remote",
 		"onView:sshHosts"
 	],
 	"contributes": {
 		"configuration": {
-			"title": "Remote - SSH",
+			"title": "OneShot Remote SSH",
 			"properties": {
 				"remote.SSH.configFile": {
 					"type": "string",
@@ -255,62 +258,62 @@
 		},
 		"commands": [
 			{
-				"command": "openremotessh.openEmptyWindow",
+				"command": "oneshotssh.openEmptyWindow",
 				"title": "Connect to Host...",
-				"category": "Remote-SSH"
+				"category": "OneShot SSH"
 			},
 			{
-				"command": "openremotessh.openEmptyWindowInCurrentWindow",
+				"command": "oneshotssh.openEmptyWindowInCurrentWindow",
 				"title": "Connect Current Window to Host...",
-				"category": "Remote-SSH"
+				"category": "OneShot SSH"
 			},
 			{
-				"command": "openremotessh.openConfigFile",
+				"command": "oneshotssh.openConfigFile",
 				"title": "Open SSH Configuration File...",
-				"category": "Remote-SSH"
+				"category": "OneShot SSH"
 			},
 			{
-				"command": "openremotessh.showLog",
+				"command": "oneshotssh.showLog",
 				"title": "Show Log",
-				"category": "Remote-SSH"
+				"category": "OneShot SSH"
 			},
 			{
-				"command": "openremotessh.explorer.emptyWindowInNewWindow",
+				"command": "oneshotssh.explorer.emptyWindowInNewWindow",
 				"title": "Connect to Host in New Window",
 				"icon": "$(empty-window)"
 			},
 			{
-				"command": "openremotessh.explorer.emptyWindowInCurrentWindow",
+				"command": "oneshotssh.explorer.emptyWindowInCurrentWindow",
 				"title": "Connect to Host in Current Window",
 				"icon": "$(arrow-right)"
 			},
 			{
-				"command": "openremotessh.explorer.reopenFolderInCurrentWindow",
+				"command": "oneshotssh.explorer.reopenFolderInCurrentWindow",
 				"title": "Open on SSH Host in Current Window",
 				"icon": "$(arrow-right)"
 			},
 			{
-				"command": "openremotessh.explorer.reopenFolderInNewWindow",
+				"command": "oneshotssh.explorer.reopenFolderInNewWindow",
 				"title": "Open on SSH Host in New Window",
 				"icon": "$(folder-opened)"
 			},
 			{
-				"command": "openremotessh.explorer.deleteFolderHistoryItem",
+				"command": "oneshotssh.explorer.deleteFolderHistoryItem",
 				"title": "Remove From Recent List",
 				"icon": "$(x)"
 			},
 			{
-				"command": "openremotessh.explorer.refresh",
+				"command": "oneshotssh.explorer.refresh",
 				"title": "Refresh",
 				"icon": "$(refresh)"
 			},
 			{
-				"command": "openremotessh.explorer.configure",
+				"command": "oneshotssh.explorer.configure",
 				"title": "Configure",
 				"icon": "$(gear)"
 			},
 			{
-				"command": "openremotessh.explorer.add",
+				"command": "oneshotssh.explorer.add",
 				"title": "Add New",
 				"icon": "$(plus)"
 			}
@@ -330,156 +333,156 @@
 		"menus": {
 			"statusBar/remoteIndicator": [
 				{
-					"command": "openremotessh.openEmptyWindow",
+					"command": "oneshotssh.openEmptyWindow",
 					"when": "remoteName =~ /^ssh-remote$/ && remoteConnectionState == connected",
 					"group": "remote_20_ssh_1general@1"
 				},
 				{
-					"command": "openremotessh.openEmptyWindowInCurrentWindow",
+					"command": "oneshotssh.openEmptyWindowInCurrentWindow",
 					"when": "remoteName =~ /^ssh-remote$/ && remoteConnectionState == connected",
 					"group": "remote_20_ssh_1general@2"
 				},
 				{
-					"command": "openremotessh.openConfigFile",
+					"command": "oneshotssh.openConfigFile",
 					"when": "remoteName =~ /^ssh-remote$/ && remoteConnectionState == connected",
 					"group": "remote_20_ssh_1general@3"
 				},
 				{
-					"command": "openremotessh.showLog",
+					"command": "oneshotssh.showLog",
 					"when": "remoteName =~ /^ssh-remote$/ && remoteConnectionState == connected",
 					"group": "remote_20_ssh_1general@4"
 				},
 				{
-					"command": "openremotessh.openEmptyWindow",
+					"command": "oneshotssh.openEmptyWindow",
 					"when": "remoteConnectionState == disconnected",
 					"group": "remote_20_ssh_3local@1"
 				},
 				{
-					"command": "openremotessh.openEmptyWindowInCurrentWindow",
+					"command": "oneshotssh.openEmptyWindowInCurrentWindow",
 					"when": "remoteConnectionState == disconnected",
 					"group": "remote_20_ssh_3local@2"
 				},
 				{
-					"command": "openremotessh.openConfigFile",
+					"command": "oneshotssh.openConfigFile",
 					"when": "remoteConnectionState == disconnected",
 					"group": "remote_20_ssh_3local@3"
 				},
 				{
-					"command": "openremotessh.openEmptyWindow",
+					"command": "oneshotssh.openEmptyWindow",
 					"when": "!remoteName && !virtualWorkspace",
 					"group": "remote_20_ssh_3local@5"
 				},
 				{
-					"command": "openremotessh.openEmptyWindowInCurrentWindow",
+					"command": "oneshotssh.openEmptyWindowInCurrentWindow",
 					"when": "!remoteName && !virtualWorkspace",
 					"group": "remote_20_ssh_3local@6"
 				},
 				{
-					"command": "openremotessh.openConfigFile",
+					"command": "oneshotssh.openConfigFile",
 					"when": "!remoteName && !virtualWorkspace",
 					"group": "remote_20_ssh_3local@7"
 				}
 			],
 			"commandPalette": [
 				{
-					"command": "openremotessh.explorer.refresh",
+					"command": "oneshotssh.explorer.refresh",
 					"when": "false"
 				},
 				{
-					"command": "openremotessh.explorer.configure",
+					"command": "oneshotssh.explorer.configure",
 					"when": "false"
 				},
 				{
-					"command": "openremotessh.explorer.add",
+					"command": "oneshotssh.explorer.add",
 					"when": "false"
 				},
 				{
-					"command": "openremotessh.explorer.emptyWindowInNewWindow",
+					"command": "oneshotssh.explorer.emptyWindowInNewWindow",
 					"when": "false"
 				},
 				{
-					"command": "openremotessh.explorer.emptyWindowInCurrentWindow",
+					"command": "oneshotssh.explorer.emptyWindowInCurrentWindow",
 					"when": "false"
 				},
 				{
-					"command": "openremotessh.explorer.reopenFolderInCurrentWindow",
+					"command": "oneshotssh.explorer.reopenFolderInCurrentWindow",
 					"when": "false"
 				},
 				{
-					"command": "openremotessh.explorer.reopenFolderInNewWindow",
+					"command": "oneshotssh.explorer.reopenFolderInNewWindow",
 					"when": "false"
 				},
 				{
-					"command": "openremotessh.explorer.deleteFolderHistoryItem",
+					"command": "oneshotssh.explorer.deleteFolderHistoryItem",
 					"when": "false"
 				}
 			],
 			"view/title": [
 				{
-					"command": "openremotessh.explorer.add",
+					"command": "oneshotssh.explorer.add",
 					"when": "view == sshHosts",
 					"group": "navigation"
 				},
 				{
-					"command": "openremotessh.explorer.configure",
+					"command": "oneshotssh.explorer.configure",
 					"when": "view == sshHosts",
 					"group": "navigation"
 				},
 				{
-					"command": "openremotessh.explorer.refresh",
+					"command": "oneshotssh.explorer.refresh",
 					"when": "view == sshHosts",
 					"group": "navigation"
 				}
 			],
 			"view/item/context": [
 				{
-					"command": "openremotessh.explorer.emptyWindowInCurrentWindow",
-					"when": "viewItem =~ /^openremotessh.explorer.host$/",
+					"command": "oneshotssh.explorer.emptyWindowInCurrentWindow",
+					"when": "viewItem =~ /^oneshotssh.explorer.host$/",
 					"group": "inline@1"
 				},
 				{
-					"command": "openremotessh.explorer.emptyWindowInNewWindow",
-					"when": "viewItem =~ /^openremotessh.explorer.host$/",
+					"command": "oneshotssh.explorer.emptyWindowInNewWindow",
+					"when": "viewItem =~ /^oneshotssh.explorer.host$/",
 					"group": "inline@1"
 				},
 				{
-					"command": "openremotessh.explorer.emptyWindowInNewWindow",
-					"when": "viewItem =~ /^openremotessh.explorer.host$/",
+					"command": "oneshotssh.explorer.emptyWindowInNewWindow",
+					"when": "viewItem =~ /^oneshotssh.explorer.host$/",
 					"group": "navigation@2"
 				},
 				{
-					"command": "openremotessh.explorer.emptyWindowInCurrentWindow",
-					"when": "viewItem =~ /^openremotessh.explorer.host$/",
+					"command": "oneshotssh.explorer.emptyWindowInCurrentWindow",
+					"when": "viewItem =~ /^oneshotssh.explorer.host$/",
 					"group": "navigation@1"
 				},
 				{
-					"command": "openremotessh.explorer.reopenFolderInCurrentWindow",
-					"when": "viewItem == openremotessh.explorer.folder",
+					"command": "oneshotssh.explorer.reopenFolderInCurrentWindow",
+					"when": "viewItem == oneshotssh.explorer.folder",
 					"group": "inline@1"
 				},
 				{
-					"command": "openremotessh.explorer.reopenFolderInNewWindow",
-					"when": "viewItem == openremotessh.explorer.folder",
+					"command": "oneshotssh.explorer.reopenFolderInNewWindow",
+					"when": "viewItem == oneshotssh.explorer.folder",
 					"group": "inline@1"
 				},
 				{
-					"command": "openremotessh.explorer.reopenFolderInNewWindow",
-					"when": "viewItem == openremotessh.explorer.folder",
+					"command": "oneshotssh.explorer.reopenFolderInNewWindow",
+					"when": "viewItem == oneshotssh.explorer.folder",
 					"group": "navigation@2"
 				},
 				{
-					"command": "openremotessh.explorer.reopenFolderInCurrentWindow",
-					"when": "viewItem == openremotessh.explorer.folder",
+					"command": "oneshotssh.explorer.reopenFolderInCurrentWindow",
+					"when": "viewItem == oneshotssh.explorer.folder",
 					"group": "navigation@1"
 				},
 				{
-					"command": "openremotessh.explorer.deleteFolderHistoryItem",
-					"when": "viewItem =~ /^openremotessh.explorer.folder/",
+					"command": "oneshotssh.explorer.deleteFolderHistoryItem",
+					"when": "viewItem =~ /^oneshotssh.explorer.folder/",
 					"group": "navigation@3"
 				},
 				{
-					"command": "openremotessh.explorer.deleteFolderHistoryItem",
-					"when": "viewItem =~ /^openremotessh.explorer.folder/",
+					"command": "oneshotssh.explorer.deleteFolderHistoryItem",
+					"when": "viewItem =~ /^oneshotssh.explorer.folder/",
 					"group": "inline@2"
 				}
 			]
@@ -487,8 +490,8 @@
 	},
 	"icon": "resources/icon.png",
 	"galleryBanner": {
-		"color": "#ffffff",
-		"theme": "light"
+		"color": "#1E3A5F",
+		"theme": "dark"
 	},
 	"categories": [
 		"Other"
@@ -516,7 +519,11 @@
 	"keywords": [
 		"remote",
 		"remote development",
-		"ssh"
+		"ssh",
+		"mfa",
+		"2fa",
+		"duo",
+		"vscodium"
 	],
 	"api": "none",
 	"enabledApiProposals": [
@@ -525,5 +532,7 @@
 	],
 	"extensionKind": [
 		"ui"
-	]
+	],
+	"license": "MIT",
+	"homepage": "https://github.com/GuyliandeJong/oneshot-remote-ssh#readme"
 }

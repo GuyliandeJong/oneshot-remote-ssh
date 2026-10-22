@@ -34,14 +34,14 @@ export class HostTreeDataProvider extends Disposable implements vscode.TreeDataP
     ) {
         super();
 
-        this._register(vscode.commands.registerCommand('openremotessh.explorer.add', () => addNewHost()));
-        this._register(vscode.commands.registerCommand('openremotessh.explorer.configure', () => openSSHConfigFile()));
-        this._register(vscode.commands.registerCommand('openremotessh.explorer.refresh', () => this.refresh()));
-        this._register(vscode.commands.registerCommand('openremotessh.explorer.emptyWindowInNewWindow', e => this.openRemoteSSHWindow(e, false)));
-        this._register(vscode.commands.registerCommand('openremotessh.explorer.emptyWindowInCurrentWindow', e => this.openRemoteSSHWindow(e, true)));
-        this._register(vscode.commands.registerCommand('openremotessh.explorer.reopenFolderInNewWindow', e => this.openRemoteSSHLocationWindow(e, false)));
-        this._register(vscode.commands.registerCommand('openremotessh.explorer.reopenFolderInCurrentWindow', e => this.openRemoteSSHLocationWindow(e, true)));
-        this._register(vscode.commands.registerCommand('openremotessh.explorer.deleteFolderHistoryItem', e => this.deleteHostLocation(e)));
+        this._register(vscode.commands.registerCommand('oneshotssh.explorer.add', () => addNewHost()));
+        this._register(vscode.commands.registerCommand('oneshotssh.explorer.configure', () => openSSHConfigFile()));
+        this._register(vscode.commands.registerCommand('oneshotssh.explorer.refresh', () => this.refresh()));
+        this._register(vscode.commands.registerCommand('oneshotssh.explorer.emptyWindowInNewWindow', e => this.openRemoteSSHWindow(e, false)));
+        this._register(vscode.commands.registerCommand('oneshotssh.explorer.emptyWindowInCurrentWindow', e => this.openRemoteSSHWindow(e, true)));
+        this._register(vscode.commands.registerCommand('oneshotssh.explorer.reopenFolderInNewWindow', e => this.openRemoteSSHLocationWindow(e, false)));
+        this._register(vscode.commands.registerCommand('oneshotssh.explorer.reopenFolderInCurrentWindow', e => this.openRemoteSSHLocationWindow(e, true)));
+        this._register(vscode.commands.registerCommand('oneshotssh.explorer.deleteFolderHistoryItem', e => this.deleteHostLocation(e)));
 
         this._register(vscode.workspace.onDidChangeConfiguration(e => {
             if (e.affectsConfiguration('remote.SSH.configFile')) {
@@ -61,14 +61,14 @@ export class HostTreeDataProvider extends Disposable implements vscode.TreeDataP
             const treeItem = new vscode.TreeItem(label);
             treeItem.description = path.posix.dirname(element.path);
             treeItem.iconPath = new vscode.ThemeIcon('folder');
-            treeItem.contextValue = 'openremotessh.explorer.folder';
+            treeItem.contextValue = 'oneshotssh.explorer.folder';
             return treeItem;
         }
 
         const treeItem = new vscode.TreeItem(element.hostname);
         treeItem.collapsibleState = element.locations.length ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None;
         treeItem.iconPath = new vscode.ThemeIcon('vm');
-        treeItem.contextValue = 'openremotessh.explorer.host';
+        treeItem.contextValue = 'oneshotssh.explorer.host';
         return treeItem;
     }
 

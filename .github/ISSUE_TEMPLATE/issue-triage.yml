@@ -62,7 +62,7 @@ body:
       value: |-
         # User Acknowledgements
         > [!TIP]
-        > Use these links to review the existing [Issues](https://github.com/jeanp413/open-remote-ssh/issues?q=sort%3Areactions-desc).
+        > Use these links to review the existing [Issues](https://github.com/GuyliandeJong/oneshot-remote-ssh/issues?q=sort%3Areactions-desc).
 
   - type: checkboxes
     attributes:

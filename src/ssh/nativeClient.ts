@@ -243,7 +243,7 @@ export default class NativeSSHConnection implements SSHClient {
         // Unix domain sockets are limited to ~104 bytes on macOS, and the
         // default temp dir there (/var/folders/…) is too long on its own.
         // /tmp keeps the path short on every platform the master runs on.
-        this.controlPath = `/tmp/open-remote-ssh-${randomBytes(6).toString('hex')}`;
+        this.controlPath = `/tmp/oneshot-remote-ssh-${randomBytes(6).toString('hex')}`;
         this.masterSocksPort = socksPort;
         const args = buildMasterArgs(this.config, this.controlPath, socksPort);
         this.logger.trace(`Starting ssh ControlMaster: ${SSH_CLIENT} ${args.join(' ')}`);

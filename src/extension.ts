@@ -6,7 +6,7 @@ import { HostTreeDataProvider } from './hostTreeView';
 import { getRemoteWorkspaceLocationData, RemoteLocationHistory } from './remoteLocationHistory';
 
 export async function activate(context: vscode.ExtensionContext) {
-    const logger = new Log('Remote - SSH');
+    const logger = new Log('OneShot Remote SSH');
     context.subscriptions.push(logger);
 
     const remoteSSHResolver = new RemoteSSHResolver(context, logger);
@@ -23,10 +23,10 @@ export async function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(vscode.window.createTreeView('sshHosts', { treeDataProvider: hostTreeDataProvider }));
     context.subscriptions.push(hostTreeDataProvider);
 
-    context.subscriptions.push(vscode.commands.registerCommand('openremotessh.openEmptyWindow', () => promptOpenRemoteSSHWindow(false)));
-    context.subscriptions.push(vscode.commands.registerCommand('openremotessh.openEmptyWindowInCurrentWindow', () => promptOpenRemoteSSHWindow(true)));
-    context.subscriptions.push(vscode.commands.registerCommand('openremotessh.openConfigFile', () => openSSHConfigFile()));
-    context.subscriptions.push(vscode.commands.registerCommand('openremotessh.showLog', () => logger.show()));
+    context.subscriptions.push(vscode.commands.registerCommand('oneshotssh.openEmptyWindow', () => promptOpenRemoteSSHWindow(false)));
+    context.subscriptions.push(vscode.commands.registerCommand('oneshotssh.openEmptyWindowInCurrentWindow', () => promptOpenRemoteSSHWindow(true)));
+    context.subscriptions.push(vscode.commands.registerCommand('oneshotssh.openConfigFile', () => openSSHConfigFile()));
+    context.subscriptions.push(vscode.commands.registerCommand('oneshotssh.showLog', () => logger.show()));
 }
 
 export function deactivate() {
