@@ -242,6 +242,7 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
         const serverVersion = remoteSSHconfig.get<ServerVersion>('serverVersion', 'match');
         const defaultExtensions = remoteSSHconfig.get<string[]>('defaultExtensions', []);
         const remotePlatformMap = remoteSSHconfig.get<Record<string, RemotePlatform>>('remotePlatform', {});
+        const remoteArchMap = remoteSSHconfig.get<Record<string, string>>('remoteArch', {});
         const remoteServerListenOnSocket = remoteSSHconfig.get<boolean>('remoteServerListenOnSocket', false)!;
         const connectTimeout = remoteSSHconfig.get<number>('connectTimeout', 60)!;
         const serverInstallPathMap = remoteSSHconfig.get<Record<string, string>>('serverInstallPath', {});
@@ -456,7 +457,8 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
                     remoteServerListenOnSocket,
                     customInstallPath,
                     this.logger,
-                    this.context.extensionPath
+                    this.context.extensionPath,
+                    remoteArchMap[sshDest.hostname]
                 );
 
                 // Update terminal env variables

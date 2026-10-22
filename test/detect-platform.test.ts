@@ -188,6 +188,21 @@ describe('detectPlatform', () => {
             expect(conn.exec).not.toHaveBeenCalledWith('echo "==$(uname -s)=="');
         });
 
+        it('runs no command at all for "linux" with remoteArch set', async () => {
+            const conn = fakeConn({});
+
+            const result = await detectPlatform(conn, 'linux', logger, 'x86_64');
+
+            expect(result).to.eql({ detectedPlatform: 'linux', detectedArch: 'x64', detectedShell: 'bash' });
+            expect(conn.exec).not.toHaveBeenCalled();
+        });
+
+        it('rejects an unsupported remoteArch value', async () => {
+            const conn = fakeConn({});
+
+            await expect(detectPlatform(conn, 'linux', logger, 'i686')).rejects.toThrow('architecture not supported: i686');
+        });
+
         it('maps "macos" to darwin', async () => {
             const conn = fakeConn({ 'uname -m': out('arm64\n') });
 

@@ -169,7 +169,7 @@ export function parseMachineArch(stdout: string): Architecture {
     }
 }
 
-export async function detectPlatform(conn: Pick<SSHClient, 'exec'>, platform: RemotePlatform | undefined, logger: Pick<Log, 'trace'>): Promise<DetectedPlatform> {
+export async function detectPlatform(conn: Pick<SSHClient, 'exec'>, platform: RemotePlatform | undefined, logger: Pick<Log, 'trace'>, arch?: string): Promise<DetectedPlatform> {
     let detectedPlatform: Platform;
     let detectedShell: Shell = 'bash';
 
@@ -208,6 +208,11 @@ export async function detectPlatform(conn: Pick<SSHClient, 'exec'>, platform: Re
 
     if (detectedPlatform === 'windows') {
         detectedArch = 'x64';
+    } else if (arch) {
+        // remote.SSH.remoteArch: skip the "uname -m" round trip. Each exec is a
+        // separate SSH session channel, which hosts using a per-session MFA
+        // gate (e.g. `ForceCommand login_duo`) challenge individually.
+        detectedArch = parseMachineArch(arch);
     } else {
         const result = await conn.exec('uname -m');
         const stdout = result.stdout.trim();
@@ -237,9 +242,10 @@ export async function installCodeServer(
     useSocketPath: boolean,
     customInstallPath: string | undefined,
     logger: Log,
-    extensionPath: string
+    extensionPath: string,
+    arch?: string
 ): Promise<ServerInstallResult> {
-    const { detectedPlatform, detectedArch, detectedShell: shell } = await detectPlatform(conn, platform, logger);
+    const { detectedPlatform, detectedArch, detectedShell: shell } = await detectPlatform(conn, platform, logger, arch);
 
     const scriptId = crypto.randomBytes(12).toString('hex');
 

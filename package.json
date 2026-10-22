@@ -190,6 +190,15 @@
 						]
 					}
 				},
+				"remote.SSH.remoteArch": {
+					"type": "object",
+					"description": "A map of the remote hostname to its CPU architecture (as printed by `uname -m`, e.g. x86_64, aarch64). Skips the `uname -m` probe. Combine with remote.SSH.remotePlatform to run server setup as a single SSH command, which matters for hosts that challenge every session with MFA (e.g. `ForceCommand login_duo`).",
+					"scope": "application",
+					"default": {},
+					"additionalProperties": {
+						"type": "string"
+					}
+				},
 				"remote.SSH.remoteServerListenOnSocket": {
 					"type": "boolean",
 					"description": "When true, the remote vscode server will listen on a socket path instead of opening a port. Only valid for Linux and macOS remotes. Requires `AllowStreamLocalForwarding` to be enabled for the SSH server.",
