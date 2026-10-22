@@ -57,6 +57,28 @@ export async function fetchRelease(serverDownloadUrlTemplate: string, version: s
     }
     const apiUrl = `https://api.github.com/repos/${parts[1]}/${parts[2]}/releases`;
 
+    // "latest": resolve via the github.com/<owner>/<repo>/releases/latest
+    // redirect, which is not subject to the anonymous REST API rate limit
+    // (60 requests/hour/IP). Falls through to the API on any failure.
+    if (objective === 'latest') {
+        try {
+            const latestUrl = `https://github.com/${parts[1]}/${parts[2]}/releases/latest`;
+            const response = await fetch(latestUrl, { method: 'HEAD', redirect: 'manual' });
+            const location = response.headers.get('location') ?? '';
+            const tag = /\/releases\/tag\/([^/?#]+)/.exec(location)?.[1];
+            if (tag) {
+                const release = splitRelease(decodeURIComponent(tag));
+                if (semver.valid(`${release.version}-${release.build}`)) {
+                    logger.info(`Found release for "latest" via redirect: ${release.version}-${release.build}`);
+                    return release;
+                }
+            }
+            logger.info(`Could not resolve "latest" from ${latestUrl} (status ${response.status}), trying the API`);
+        } catch (error) {
+            logger.info(`Could not resolve "latest" via redirect, trying the API: ${error}`);
+        }
+    }
+
     let found: IRelease | undefined;
     try {
         const response = await fetch(apiUrl, {
@@ -67,7 +89,13 @@ export async function fetchRelease(serverDownloadUrlTemplate: string, version: s
                 'X-GitHub-Api-Version': '2022-11-28',
             },
         });
-        const data = await response.json() as Array<githubReleasesData>;
+        const body = await response.json() as unknown;
+        if (!Array.isArray(body)) {
+            // e.g. {"message": "API rate limit exceeded for ..."}
+            const message = (body as { message?: string } | null)?.message ?? JSON.stringify(body);
+            throw new Error(`GitHub API returned HTTP ${response.status}: ${message}`);
+        }
+        const data = body as Array<githubReleasesData>;
 
         // Parse and sort all releases descending by semver,
         // using hyphen to separate the version from the build/release number.
