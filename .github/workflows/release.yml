@@ -1,0 +1,91 @@
+name: Release
+
+# Builds the VSIX and publishes a GitHub release for the version in
+# package.json. Runs when a release-notes file for a new version lands on
+# main, or manually. Does nothing if that release already exists.
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/release-notes/*.md"
+
+permissions: {}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # create the tag and the release
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Read version
+        id: version
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          NOTES=".github/release-notes/v$VERSION.md"
+          if [ ! -f "$NOTES" ]; then
+            echo "::error::Missing $NOTES"
+            exit 1
+          fi
+          echo "notes=$NOTES" >> "$GITHUB_OUTPUT"
+
+      - name: Skip if release exists
+        id: exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Node.js environment
+        if: steps.exists.outputs.skip == 'false'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+
+      - name: Install dependencies
+        if: steps.exists.outputs.skip == 'false'
+        run: |
+          npm ci
+
+      - name: Unit tests
+        if: steps.exists.outputs.skip == 'false'
+        run: |
+          npx vitest run test/detect-platform.test.ts test/fetch-release.test.ts
+
+      - name: Package VSIX
+        if: steps.exists.outputs.skip == 'false'
+        run: |
+          npx vsce package --no-dependencies -o oneshot-remote-ssh.vsix
+          sha256sum oneshot-remote-ssh.vsix
+
+      - name: Create release
+        if: steps.exists.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+          NOTES: ${{ steps.version.outputs.notes }}
+        run: |
+          cp "$NOTES" notes.md
+          printf '\nSHA-256 `oneshot-remote-ssh.vsix`: `%s`\n' "$(sha256sum oneshot-remote-ssh.vsix | cut -d' ' -f1)" >> notes.md
+          gh release create "$TAG" oneshot-remote-ssh.vsix \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "OneShot Remote SSH $VERSION" \
+            --notes-file notes.md
