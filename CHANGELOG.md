@@ -3,6 +3,32 @@ Changelog
 
 All notable changes to this project will be documented in this file.
 
+[v1.0.0](https://github.com/GuyliandeJong/oneshot-remote-ssh/releases/tag/v1.0.0) | 2026-10-22
+--------------------------------------------------------------------------------------------
+
+First release of OneShot Remote SSH, forked from Open Remote - SSH v0.5.0.
+
+### Added
+
+- `remote.SSH.remoteArch` setting: skips the `uname -m` probe; with `remote.SSH.remotePlatform`
+  server setup runs as a single SSH command (one MFA prompt with `ForceCommand login_duo`)
+- install scripts for Linux/macOS (`install/install.sh`) and Windows (`install/install.ps1`)
+- `THIRD_PARTY_NOTICES.md` for the packages bundled into the extension
+
+### Changed
+
+- `"serverVersion": "latest"` resolves through the GitHub `releases/latest` redirect instead of
+  the rate-limited GitHub API (API kept as fallback)
+- extension ID `guyliandejong.oneshot-remote-ssh`, display name, icon, command category
+  `OneShot SSH` and command IDs `oneshotssh.*`, log channel `OneShot Remote SSH`
+
+### Fixed
+
+- a GitHub API error response (e.g. rate limit) no longer throws `.map is not a function`;
+  the log shows GitHub's message and HTTP status
+
+The entries below are the history of the upstream project.
+
 [v0.5.0](https://github.com/jeanp413/open-remote-ssh/releases/tag/v0.5.0) | 2026-10-21
 --------------------------------------------------------------------------------------
 
