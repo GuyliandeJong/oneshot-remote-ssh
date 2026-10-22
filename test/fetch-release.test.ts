@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { Log } from '../src/common/logger';
 import { fetchRelease } from '../src/fetchRelease';
 
 const TEMPLATE = 'https://github.com/VSCodium/vscodium/releases/download/${version}${release}/vscodium-reh-${os}-${arch}-${version}${release}.tar.gz';
-const logger = { info: vi.fn(), error: vi.fn(), trace: vi.fn() } as any;
+const logger = { info: vi.fn(), error: vi.fn(), trace: vi.fn() } as unknown as Log & { error: ReturnType<typeof vi.fn> };
 
 function redirectTo(location: string | null, status = 302) {
     return { status, headers: new Headers(location ? { location } : {}) };
