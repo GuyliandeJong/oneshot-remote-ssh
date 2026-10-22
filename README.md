@@ -12,6 +12,9 @@ This is a fork of [Open Remote - SSH](https://github.com/jeanp413/open-remote-ss
 and contributors, distributed under the same MIT license. All credit for the extension itself
 goes to the original project; this fork adds the changes listed below.
 
+> **New here? Follow the step-by-step [Getting started](docs/getting-started.md) guide:**
+> server check, SSH setup, install, settings, first connection and troubleshooting.
+
 ## Why
 
 `login_duo` as a `ForceCommand` challenges every SSH *session channel*, not every login.
@@ -43,6 +46,8 @@ Settings keep the `remote.SSH.*` names and connections keep the `ssh-remote+<hos
 so existing settings, `.code-workspace` files and recent-folder entries keep working.
 
 ## Install
+
+Full walkthrough: [Getting started](docs/getting-started.md). Short version:
 
 Close the editor first. The scripts download the latest release, remove extensions that claim
 the same `ssh-remote` connections (`jeanp413.open-remote-ssh`, `ms-vscode-remote.remote-ssh`;
