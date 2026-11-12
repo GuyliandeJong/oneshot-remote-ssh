@@ -3,8 +3,8 @@ Changelog
 
 All notable changes to this project will be documented in this file.
 
-Unreleased
-----------
+[v1.1.0](https://github.com/GuyliandeJong/oneshot-remote-ssh/releases/tag/v1.1.0) | 2026-11-12
+----------------------------------------------------------------------------------------------
 
 ### Added
 
@@ -13,6 +13,10 @@ Unreleased
   server, so it costs no new login (no MFA prompt). It closes after
   `remote.SSH.persistentConnectionIdleTimeout` seconds without windows (default 600)
 - command **OneShot SSH: Close Background SSH Connections**
+
+### Changed
+
+- the README links to the [getting started guide](docs/getting-started.md)
 
 [v1.0.0](https://github.com/GuyliandeJong/oneshot-remote-ssh/releases/tag/v1.0.0) | 2026-10-22
 --------------------------------------------------------------------------------------------
