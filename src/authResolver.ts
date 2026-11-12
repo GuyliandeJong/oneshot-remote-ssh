@@ -1,33 +1,24 @@
-import type { ParsedKey } from 'ssh2-streams';
 import type { ServerVersion } from './server-config/types';
 
-import * as cp from 'child_process';
-import * as fs from 'fs';
 import * as net from 'net';
-import * as stream from 'stream';
 import { SocksClient, SocksClientOptions } from 'socks';
 import * as vscode from 'vscode';
-import * as ssh2 from 'ssh2';
 import { Log } from './common/logger';
 import SSHDestination from './ssh/sshDestination';
-import SSHConnection, { SSHTunnelConfig } from './ssh/sshConnection';
-import { loadKnownHosts, matchHostKey, appendHostKey, replaceHostKey, removeHostFromEntry, findConflictingEntries, keyFingerprint, keyTypeOf, KnownHosts, KnownHostsEntry, KnownHostsFilesConfig } from './ssh/knownHosts';
+import { SSHTunnelConfig } from './ssh/sshConnection';
 import NativeSSHConnection, { isGssapiAuthenticationRequested } from './ssh/nativeClient';
 import type { SSHClient, SSHExecChannel } from './ssh/sshClient';
 import SSHConfiguration, { getSSHConfigPath, type HostConfiguration } from './ssh/sshConfig';
-import { gatherIdentityFiles, SSHKey } from './ssh/identityFiles';
-import { untildify, exists as fileExists } from './common/files';
+import { openSSHConnection, openAgentForwardSession, type ConnectionUI, type ConnectPlan, type HopPlan, type HostVerificationPolicy, type OpenedSSHConnection, type ProxyCommandPlan } from './ssh/connect';
+import { untildify } from './common/files';
 import { findRandomPort } from './common/ports';
 import { disposeAll } from './common/disposable';
-import { installCodeServer, ServerInstallError, findServerInstallPath } from './serverSetup';
+import { installCodeServer, ServerInstallError, findServerInstallPath, type ServerInstallResult } from './serverSetup';
 import type { RemotePlatform } from './types';
 import { isWindows } from './common/platform';
 import * as os from 'os';
 
-const PASSWORD_RETRY_COUNT = 3;
-const PASSPHRASE_RETRY_COUNT = 3;
-
-export type HostVerificationPolicy = 'accept' | 'ask' | 'reject';
+export type { HostVerificationPolicy } from './ssh/connect';
 
 export const REMOTE_SSH_AUTHORITY = 'ssh-remote';
 
@@ -204,18 +195,32 @@ export function resolveProxyJumps(
     return hops;
 }
 
+/** Where the window reaches the remote server, and what its extension host needs. */
+interface ResolvedServer {
+    localPort: number;
+    connectionToken: string;
+    envVariables: Record<string, string | null>;
+}
+
+type InstallServer = (conn: Pick<SSHClient, 'exec' | 'execPartial'>) => Promise<ServerInstallResult>;
+
 export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode.Disposable {
 
-    private proxyConnections: SSHConnection[] = [];
+    private openedConnection: OpenedSSHConnection | undefined;
     private sshConnection: SSHClient | undefined;
     private sshAgentSock: string | undefined;
-    private proxyCommandProcess: cp.ChildProcessWithoutNullStreams | undefined;
     private agentForwardSession: SSHExecChannel | undefined;
 
     private socksTunnel: SSHTunnelConfig | undefined;
     private tunnels: TunnelInfo[] = [];
 
     private labelFormatterDisposable: vscode.Disposable | undefined;
+
+    private readonly connectionUI: ConnectionUI = {
+        input: (title, password) => Promise.resolve(vscode.window.showInputBox({ title, password, ignoreFocusOut: true })),
+        confirm: async (message, action) => await vscode.window.showWarningMessage(message, { modal: true }, action) === action,
+        error: message => void vscode.window.showErrorMessage(message),
+    };
 
     constructor(
         readonly context: vscode.ExtensionContext,
@@ -297,157 +302,11 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
                     }
                 }
 
-                // The bundled ssh2 library cannot perform the SSH
-                // gssapi-with-mic method, which needs access to the platform's
-                // Kerberos credentials. When the host config asks for GSSAPI,
-                // delegate the connection to the local ssh client: it supports
-                // GSSAPI natively and applies the user's own ssh_config for
-                // everything else (ProxyJump, ProxyCommand, ForwardAgent, ...).
-                const useNativeClient = isGssapiAuthenticationRequested(sshHostConfig);
-
-                let proxyStream: ssh2.ClientChannel | stream.Duplex | undefined;
-
-                if (!useNativeClient) {
-                    const preferredAuthentications = sshHostConfig['PreferredAuthentications'] ? sshHostConfig['PreferredAuthentications'].split(',').map(s => s.trim()) : ['publickey', 'password', 'keyboard-interactive'];
-
-                    const identityFiles: string[] = (sshHostConfig['IdentityFile']?.map(f => untildify(interpolatePath(f)))) || [];
-                    const identitiesOnly = (sshHostConfig['IdentitiesOnly'] || 'no').toLowerCase() === 'yes';
-                    const identityKeys = await gatherIdentityFiles(identityFiles, this.sshAgentSock, identitiesOnly, this.logger);
-
-                    const agent = agentForward && this.sshAgentSock ? new ssh2.OpenSSHAgent(this.sshAgentSock) : undefined;
-
-                    // Create proxy jump connections if any
-                    if (sshHostConfig['ProxyJump']) {
-                        const proxyJumps = resolveProxyJumps(
-                            sshHostConfig['ProxyJump'],
-                            (host) => sshconfig.getHostConfiguration(host)
-                        );
-                        for (let i = 0; i < proxyJumps.length; i++) {
-                            const [proxy, proxyHostConfig] = proxyJumps[i];
-                            const proxyHostName = proxyHostConfig['HostName'] ? SSHConfiguration.interpolate(proxyHostConfig['HostName'], { '%': '%', 'h': proxy.hostname }) : proxy.hostname;
-                            const proxyUser = proxyHostConfig['User'] || proxy.user || sshUser;
-                            const proxyPort = getProxyJumpPort(proxy, proxyHostConfig);
-
-                            const proxyAgentForward = enableAgentForwarding && (proxyHostConfig['ForwardAgent'] || 'no').toLowerCase() === 'yes';
-                            const proxyAgent = proxyAgentForward && this.sshAgentSock ? new ssh2.OpenSSHAgent(this.sshAgentSock) : undefined;
-
-                            const proxyIdentityFiles: string[] = (proxyHostConfig['IdentityFile']?.map(f => untildify(interpolatePath(f)))) || [];
-                            const proxyIdentitiesOnly = (proxyHostConfig['IdentitiesOnly'] || 'no').toLowerCase() === 'yes';
-                            const proxyIdentityKeys = await gatherIdentityFiles(proxyIdentityFiles, this.sshAgentSock, proxyIdentitiesOnly, this.logger);
-
-                            const proxyAuthHandler = this.getSSHAuthHandler(proxyUser, proxyHostName, proxyIdentityKeys, preferredAuthentications);
-                            const proxyConnection = new SSHConnection({
-                                host: !proxyStream ? proxyHostName : undefined,
-                                port: !proxyStream ? proxyPort : undefined,
-                                sock: proxyStream,
-                                username: proxyUser,
-                                readyTimeout: connectTimeout * 1000,
-                                strictVendor: false,
-                                agentForward: proxyAgentForward,
-                                agent: proxyAgent,
-                                hostVerifier: this.createHostVerifier(proxyHostName, proxyPort, proxyHostConfig, verifyUnknownHosts, verifyKnownHosts),
-                                authHandler: (arg0, arg1, arg2) => (proxyAuthHandler(arg0, arg1, arg2), undefined)
-                            });
-                            this.proxyConnections.push(proxyConnection);
-
-                            const nextProxyJump = i < proxyJumps.length - 1 ? proxyJumps[i + 1] : undefined;
-                            const destIP = nextProxyJump ? (nextProxyJump[1]['HostName'] || nextProxyJump[0].hostname) : sshHostName;
-                            const destPort = nextProxyJump ? getProxyJumpPort(nextProxyJump[0], nextProxyJump[1]) : sshPort;
-                            proxyStream = await proxyConnection.forwardOut('127.0.0.1', 0, destIP, destPort);
-                        }
-                    } else if (sshHostConfig['ProxyCommand']) {
-                        const proxyCommandValue: string | string[] = sshHostConfig['ProxyCommand'];
-                        const proxyCommandLine = [proxyCommandValue].flat().join(' ');
-                        const proxyCommandValues = {
-                            '%': '%',
-                            'h': sshHostName,
-                            'n': sshDest.hostname,
-                            'p': sshPort.toString(),
-                            'r': sshUser,
-                        };
-                        const interpolateProxyCommand = (value: string) => SSHConfiguration.interpolate(value, proxyCommandValues);
-
-                        // Like OpenSSH: the shell parses the whole line, quoting included.
-                        let proxyCommand = interpolateProxyCommand(proxyCommandLine);
-                        let proxyArgs: string[] = [];
-                        let options: cp.SpawnOptionsWithoutStdio = { shell: true };
-                        if (isWindows) {
-                            // Like Win32-OpenSSH: no shell, except cmd.exe for batch
-                            // files and program paths with a space.
-                            proxyArgs = splitProxyCommand(proxyCommandValue).map(interpolateProxyCommand);
-                            proxyCommand = proxyArgs.shift()!;
-                            options = {};
-                            if (/\.(bat|cmd)$/.test(proxyCommand) || proxyCommand.includes(' ')) {
-                                proxyCommand = `"${proxyCommand}"`;
-                                proxyArgs = proxyArgs.map((arg) => arg.includes(' ') ? `"${arg}"` : arg);
-                                options = { shell: true, windowsHide: true, windowsVerbatimArguments: true };
-                            }
-                        }
-
-                        if (options.shell) {
-                            assertShellSafeProxyCommand(proxyCommandLine, proxyCommandValues);
-                        }
-
-                        this.logger.trace(`Spawning ProxyCommand: ${[proxyCommand, ...proxyArgs].join(' ')}`);
-
-                        const child = cp.spawn(proxyCommand, proxyArgs, options);
-                        proxyStream = stream.Duplex.from({ readable: child.stdout, writable: child.stdin });
-                        this.proxyCommandProcess = child;
-                    }
-
-                    // Create final shh connection
-                    const sshAuthHandler = this.getSSHAuthHandler(sshUser, sshHostName, identityKeys, preferredAuthentications);
-
-                    this.sshConnection = new SSHConnection({
-                        host: !proxyStream ? sshHostName : undefined,
-                        port: !proxyStream ? sshPort : undefined,
-                        sock: proxyStream,
-                        username: sshUser,
-                        readyTimeout: connectTimeout * 1000,
-                        strictVendor: false,
-                        agentForward,
-                        agent,
-                        hostVerifier: this.createHostVerifier(sshHostName, sshPort, sshHostConfig, verifyUnknownHosts, verifyKnownHosts),
-                        authHandler: (arg0, arg1, arg2) => (sshAuthHandler(arg0, arg1, arg2), undefined),
-                    });
-                } else {
-                    this.logger.info(`GSSAPI authentication requested for ${sshDest.hostname}; connecting via the local SSH client`);
-                    this.sshConnection = new NativeSSHConnection({
-                        destination: sshDest.user ? `${sshDest.user}@${sshDest.hostname}` : sshDest.hostname,
-                        port: sshDest.port,
-                        configFile: getSSHConfigPath(),
-                        dynamicForwarding: enableDynamicForwarding,
-                        readyTimeout: connectTimeout * 1000,
-                        logger: this.logger
-                    });
-                }
-
-                await this.sshConnection.connect();
-
-                const envVariables: Record<string, string | null> = {};
-                if (agentForward) {
-                    // The agent-forwarding socket sshd creates is scoped to the ssh channel that
-                    // requested it and is torn down as soon as that channel closes. The server
-                    // install/start script runs on its own short-lived exec channel, so any
-                    // SSH_AUTH_SOCK it reports is already stale by the time we get here. Keep a
-                    // dedicated channel open for the lifetime of the connection instead, and use
-                    // its socket path everywhere else (terminals, extension host). Agent
-                    // forwarding is best-effort: a failure here must not prevent connecting.
-                    try {
-                        const remoteAgentSock = await this.openAgentForwardSession();
-                        if (remoteAgentSock) {
-                            envVariables['SSH_AUTH_SOCK'] = remoteAgentSock;
-                        }
-                    } catch (e) {
-                        this.logger.error(`Failed to setup agent forwarding`, e);
-                    }
-                }
-
                 // Find the custom install path for this hostname (supports wildcards)
                 const customInstallPath = findServerInstallPath(sshDest.hostname, serverInstallPathMap);
 
-                const installResult = await installCodeServer(
-                    this.sshConnection,
+                const installServer: InstallServer = conn => installCodeServer(
+                    conn,
                     serverDownloadUrlTemplate,
                     serverVersion,
                     defaultExtensions,
@@ -461,25 +320,87 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
                     remoteArchMap[sshDest.hostname]
                 );
 
+                // The bundled ssh2 library cannot perform the SSH
+                // gssapi-with-mic method, which needs access to the platform's
+                // Kerberos credentials. When the host config asks for GSSAPI,
+                // delegate the connection to the local ssh client: it supports
+                // GSSAPI natively and applies the user's own ssh_config for
+                // everything else (ProxyJump, ProxyCommand, ForwardAgent, ...).
+                const useNativeClient = isGssapiAuthenticationRequested(sshHostConfig);
+
+                let resolved: ResolvedServer | undefined;
+
+                if (!useNativeClient) {
+                    const plan: ConnectPlan = {
+                        jumps: [],
+                        target: {
+                            hostName: sshHostName,
+                            port: sshPort,
+                            user: sshUser,
+                            identityFiles: (sshHostConfig['IdentityFile']?.map(f => untildify(interpolatePath(f)))) || [],
+                            identitiesOnly: (sshHostConfig['IdentitiesOnly'] || 'no').toLowerCase() === 'yes',
+                            agentForward,
+                            knownHosts: pickKnownHostsConfig(sshHostConfig),
+                        },
+                        preferredAuthentications: sshHostConfig['PreferredAuthentications'] ? sshHostConfig['PreferredAuthentications'].split(',').map(s => s.trim()) : ['publickey', 'password', 'keyboard-interactive'],
+                        agentSock: this.sshAgentSock,
+                        connectTimeout,
+                        keepaliveInterval: 0,
+                        verifyUnknownHosts,
+                        verifyKnownHosts,
+                    };
+
+                    if (sshHostConfig['ProxyJump']) {
+                        const proxyJumps = resolveProxyJumps(
+                            sshHostConfig['ProxyJump'],
+                            (host) => sshconfig.getHostConfiguration(host)
+                        );
+                        plan.jumps = proxyJumps.map(([proxy, proxyHostConfig]): HopPlan => ({
+                            hostName: proxyHostConfig['HostName'] ? SSHConfiguration.interpolate(proxyHostConfig['HostName'], { '%': '%', 'h': proxy.hostname }) : proxy.hostname,
+                            port: getProxyJumpPort(proxy, proxyHostConfig),
+                            user: proxyHostConfig['User'] || proxy.user || sshUser,
+                            identityFiles: (proxyHostConfig['IdentityFile']?.map(f => untildify(interpolatePath(f)))) || [],
+                            identitiesOnly: (proxyHostConfig['IdentitiesOnly'] || 'no').toLowerCase() === 'yes',
+                            agentForward: enableAgentForwarding && (proxyHostConfig['ForwardAgent'] || 'no').toLowerCase() === 'yes',
+                            knownHosts: pickKnownHostsConfig(proxyHostConfig),
+                        }));
+                    } else if (sshHostConfig['ProxyCommand']) {
+                        plan.proxyCommand = buildProxyCommand(sshHostConfig['ProxyCommand'], {
+                            '%': '%',
+                            'h': sshHostName,
+                            'n': sshDest.hostname,
+                            'p': sshPort.toString(),
+                            'r': sshUser,
+                        });
+                    }
+
+                    if (!resolved) {
+                        this.openedConnection = await openSSHConnection(plan, this.connectionUI, this.logger);
+                        this.sshConnection = this.openedConnection.connection;
+                    }
+                } else {
+                    this.logger.info(`GSSAPI authentication requested for ${sshDest.hostname}; connecting via the local SSH client`);
+                    this.sshConnection = new NativeSSHConnection({
+                        destination: sshDest.user ? `${sshDest.user}@${sshDest.hostname}` : sshDest.hostname,
+                        port: sshDest.port,
+                        configFile: getSSHConfigPath(),
+                        dynamicForwarding: enableDynamicForwarding,
+                        readyTimeout: connectTimeout * 1000,
+                        logger: this.logger
+                    });
+                }
+
+                if (!resolved) {
+                    resolved = await this.setupInProcess(agentForward, enableDynamicForwarding, installServer);
+                }
+
                 // Update terminal env variables
                 this.context.environmentVariableCollection.persistent = false;
-                for (const [key, value] of Object.entries(envVariables)) {
+                for (const [key, value] of Object.entries(resolved.envVariables)) {
                     if (value) {
                         this.context.environmentVariableCollection.replace(key, value);
                     }
                 }
-
-                if (enableDynamicForwarding) {
-                    const socksPort = await findRandomPort();
-                    this.socksTunnel = await this.sshConnection!.addTunnel({
-                        name: `ssh_tunnel_socks_${socksPort}`,
-                        localPort: socksPort,
-                        socks: true
-                    });
-                }
-
-                const tunnelConfig = await this.openTunnel(0, installResult.listeningOn);
-                this.tunnels.push(tunnelConfig);
 
                 // Enable ports view
                 vscode.commands.executeCommand('setContext', 'forwardedPortsViewEnabled', true);
@@ -496,8 +417,8 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
                     }
                 });
 
-                const resolvedResult: vscode.ResolverResult = new vscode.ResolvedAuthority('127.0.0.1', tunnelConfig.localPort, installResult.connectionToken);
-                resolvedResult.extensionHostEnv = envVariables;
+                const resolvedResult: vscode.ResolverResult = new vscode.ResolvedAuthority('127.0.0.1', resolved.localPort, resolved.connectionToken);
+                resolvedResult.extensionHostEnv = resolved.envVariables;
                 return resolvedResult;
             } catch (e: unknown) {
                 this.logger.error(`Error resolving authority`, e);
@@ -525,214 +446,46 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
         });
     }
 
-    // @types/ssh2 predates the current runtime and types the key as a string;
-    // without `hostHash` set, ssh2 actually passes the raw key blob and
-    // supports an async verify callback.
-    private createHostVerifier(hostname: string, port: number, hostConfig: KnownHostsFilesConfig, unknownPolicy: HostVerificationPolicy, knownPolicy: HostVerificationPolicy) {
-        return ((rawKey: Buffer, verify: (valid: boolean) => void) => {
-            this.checkHostKey(hostname, port, rawKey, hostConfig, unknownPolicy, knownPolicy)
-                .then(verify, e => {
-                    this.logger.error(`Error verifying host key for ${hostname}`, e);
-                    verify(false);
-                });
-        }) as unknown as ssh2.ConnectConfig['hostVerifier'];
-    }
+    /** Set up the server over the connection this window opened itself. */
+    private async setupInProcess(agentForward: boolean, enableDynamicForwarding: boolean, installServer: InstallServer): Promise<ResolvedServer> {
+        await this.sshConnection!.connect();
 
-    // Note: the 'ask' prompts run inside ssh2's handshake, which is bounded by
-    // readyTimeout. An answer given after the timeout still records the key,
-    // and the retry then connects against the just-approved entry.
-    private async checkHostKey(hostname: string, port: number, rawKey: Buffer, hostConfig: KnownHostsFilesConfig, unknownPolicy: HostVerificationPolicy, knownPolicy: HostVerificationPolicy): Promise<boolean> {
-        const keyType = keyTypeOf(rawKey);
-        const keyBase64 = rawKey.toString('base64');
-        const fingerprint = keyFingerprint(rawKey);
-        const alias = hostConfig['HostKeyAlias'];
-
-        const knownHosts = await loadKnownHosts(hostConfig, this.logger);
-        const verdict = matchHostKey(knownHosts.entries, hostname, port, keyType, keyBase64, alias);
-
-        switch (verdict.status) {
-            case 'match':
-                this.logger.trace(`Host key for ${hostname} matches ${verdict.entry.file}:${verdict.entry.line + 1} (${keyType} ${fingerprint})`);
-                return true;
-            case 'revoked':
-                // Marked @revoked in known_hosts: refused unconditionally, no
-                // setting overrides this — same as OpenSSH
-                this.logger.error(`Host key for ${hostname} is REVOKED by ${verdict.entry.file}:${verdict.entry.line + 1} (${keyType} ${fingerprint})`);
-                return false;
-            case 'unknown': {
-                // A read failure means recorded keys may be missing, so
-                // 'unknown' cannot be trusted: never auto-accept it
-                const trustStoreIncomplete = knownHosts.readFailures.length > 0;
-
-                if (unknownPolicy === 'accept' && !trustStoreIncomplete) {
-                    await this.rememberHostKey(knownHosts.userFile, hostname, port, keyType, keyBase64, alias);
-                    return true;
-                }
-                if (unknownPolicy === 'reject') {
-                    this.logger.error(`Rejecting unknown ${keyType} host key for ${hostname} (${fingerprint}) — remote.SSH.verifyUnknownHosts is 'reject'`);
-                    return false;
-                }
-
-                const readFailureNote = trustStoreIncomplete
-                    ? `\n\nNote: ${knownHosts.readFailures.join(', ')} could not be read, so this host may in fact be recorded there.`
-                    : '';
-                const connect = 'Connect';
-                const answer = await vscode.window.showWarningMessage(
-                    `"${hostname}" has an unknown ${keyType} host key.\n\nFingerprint:\n${fingerprint}\n\n${knownHosts.userFile ? 'Connect and remember this key?' : 'Connect? UserKnownHostsFile is \'none\', so this key will not be remembered.'}${readFailureNote}`,
-                    { modal: true },
-                    connect
-                );
-                if (answer === connect) {
-                    // Don't persist while the trust store is unreadable: the
-                    // key may already be recorded in the unreadable file, and
-                    // appending a duplicate would mask the actual problem
-                    if (!trustStoreIncomplete) {
-                        await this.rememberHostKey(knownHosts.userFile, hostname, port, keyType, keyBase64, alias);
-                    }
-                    return true;
-                }
-                this.logger.info(`Connection to ${hostname} cancelled at the host key prompt`);
-                return false;
-            }
-            case 'mismatch': {
-                const recordedFingerprint = keyFingerprint(Buffer.from(verdict.entry.keyBase64, 'base64'));
-                this.logger.error(`Host key for ${hostname} does not match the one recorded in ${verdict.entry.file}:${verdict.entry.line + 1}! Recorded ${recordedFingerprint}, received ${fingerprint}`);
-
-                if (knownPolicy === 'accept') {
-                    return true;
-                }
-                if (knownPolicy === 'reject') {
-                    return false;
-                }
-
-                const update = 'Update and Connect';
-                const answer = await vscode.window.showWarningMessage(
-                    `WARNING: the ${keyType} host key for "${hostname}" has changed!\n\nRecorded fingerprint:\n${recordedFingerprint}\n\nReceived fingerprint:\n${fingerprint}\n\nThis can mean the server was reinstalled — or that the connection is being intercepted.`,
-                    { modal: true },
-                    update
-                );
-                if (answer !== update) {
-                    return false;
-                }
-
-                const surviving = await this.updateHostKey(knownHosts, hostname, port, keyType, keyBase64, alias);
-                if (surviving.length) {
-                    // The old key still verifies, so approving would leave the
-                    // host trusting both keys — exactly what the warning is
-                    // about. Refuse and say which line has to go.
-                    const where = surviving.map(e => `${e.file}:${e.line + 1}`).join(', ');
-                    this.logger.error(`Refusing to connect to ${hostname}: the previous key is still recorded in ${where}`);
-                    void vscode.window.showErrorMessage(`"${hostname}" still has a conflicting ${keyType} host key recorded in ${where}. Remove it (ssh-keygen -R) and connect again.`);
-                    return false;
-                }
-                return true;
-            }
-        }
-    }
-
-    /**
-     * Records the new key and clears every entry that still pins an older one:
-     * a single-host line is rewritten in place, a line naming several hosts
-     * loses just this host. Returns the entries that couldn't be cleared —
-     * wildcard lines and files the user doesn't own — which the caller must
-     * treat as the old key still being trusted.
-     */
-    private async updateHostKey(knownHosts: KnownHosts, hostname: string, port: number, keyType: string, keyBase64: string, alias?: string): Promise<KnownHostsEntry[]> {
-        const conflicts = findConflictingEntries(knownHosts.entries, hostname, port, keyType, keyBase64, alias);
-        const surviving: KnownHostsEntry[] = [];
-        let replacedInPlace = false;
-
-        // Descending line order: deleting a line shifts the ones after it
-        const ordered = [...conflicts].sort((a, b) => a.file === b.file ? b.line - a.line : a.file.localeCompare(b.file));
-
-        for (const entry of ordered) {
-            if (!knownHosts.userFiles.includes(entry.file)) {
-                surviving.push(entry);
-                continue;
-            }
+        const envVariables: Record<string, string | null> = {};
+        if (agentForward) {
+            // The agent-forwarding socket sshd creates is scoped to the ssh channel that
+            // requested it and is torn down as soon as that channel closes. The server
+            // install/start script runs on its own short-lived exec channel, so any
+            // SSH_AUTH_SOCK it reports is already stale by the time we get here. Keep a
+            // dedicated channel open for the lifetime of the connection instead, and use
+            // its socket path everywhere else (terminals, extension host). Agent
+            // forwarding is best-effort: a failure here must not prevent connecting.
             try {
-                if (!replacedInPlace && await replaceHostKey(entry, hostname, port, keyBase64, alias)) {
-                    replacedInPlace = true;
-                } else if (!await removeHostFromEntry(entry, hostname, port, alias)) {
-                    surviving.push(entry);
+                const { channel, sock } = await openAgentForwardSession(this.sshConnection!, this.logger);
+                this.agentForwardSession?.close();
+                this.agentForwardSession = channel;
+                if (sock) {
+                    envVariables['SSH_AUTH_SOCK'] = sock;
                 }
             } catch (e) {
-                this.logger.error(`Couldn't update ${entry.file}`, e);
-                surviving.push(entry);
+                this.logger.error(`Failed to setup agent forwarding`, e);
             }
         }
 
-        if (!replacedInPlace && !surviving.length) {
-            await this.rememberHostKey(knownHosts.userFile, hostname, port, keyType, keyBase64, alias);
-        }
+        const installResult = await installServer(this.sshConnection!);
 
-        return surviving;
-    }
-
-    // Failing to write the file shouldn't block the connection
-    private async rememberHostKey(file: string | undefined, hostname: string, port: number, keyType: string, keyBase64: string, alias?: string): Promise<void> {
-        if (!file) {
-            this.logger.info(`Not recording the ${keyType} host key for ${hostname}: UserKnownHostsFile is 'none'`);
-            return;
-        }
-        this.logger.info(`Adding ${keyType} host key for ${hostname} to ${file}`);
-        try {
-            await appendHostKey(file, hostname, port, keyType, keyBase64, alias);
-        } catch (e) {
-            this.logger.error(`Couldn't add the host key for ${hostname} to ${file}`, e);
-        }
-    }
-
-    private openAgentForwardSession(): Promise<string | undefined> {
-        // No pty here on purpose: a pty echoes back whatever is written to the
-        // channel before the remote shell executes it, which would otherwise be
-        // mistaken for the command's actual output. `exec cat` keeps the process
-        // (and therefore the channel's agent-forwarding socket) alive indefinitely
-        // after printing the socket path once.
-        return this.sshConnection!.execChannel('echo "$SSH_AUTH_SOCK"; exec cat').then(channel => {
-            this.agentForwardSession?.close();
-            this.agentForwardSession = channel;
-
-            return new Promise<string | undefined>(resolve => {
-                let buffer = '';
-                let resolved = false;
-
-                const finish = (value: string | undefined) => {
-                    if (!resolved) {
-                        resolved = true;
-                        channel.removeListener('data', onData);
-                        channel.removeListener('close', onClose);
-                        clearTimeout(timer);
-                        resolve(value);
-                    }
-                };
-
-                const onData = (data: Buffer) => {
-                    buffer += data.toString();
-                    const newlineIdx = buffer.indexOf('\n');
-                    if (newlineIdx < 0) {
-                        return;
-                    }
-                    // A forwarded SSH_AUTH_SOCK is always an absolute path. Anything else
-                    // (e.g. a non-POSIX remote echoing the command back verbatim) is rejected
-                    // rather than exported as a bogus value.
-                    const value = buffer.slice(0, newlineIdx).trim();
-                    finish(value.startsWith('/') ? value : undefined);
-                };
-
-                // On a non-POSIX remote the `echo`d line ends the command and the channel
-                // closes without a usable path; resolve now instead of waiting for the timeout.
-                const onClose = () => finish(undefined);
-
-                const timer = setTimeout(() => {
-                    this.logger.trace('Timed out waiting for remote SSH_AUTH_SOCK');
-                    finish(undefined);
-                }, 5000);
-
-                channel.on('data', onData);
-                channel.on('close', onClose);
+        if (enableDynamicForwarding) {
+            const socksPort = await findRandomPort();
+            this.socksTunnel = await this.sshConnection!.addTunnel({
+                name: `ssh_tunnel_socks_${socksPort}`,
+                localPort: socksPort,
+                socks: true
             });
-        });
+        }
+
+        const tunnelConfig = await this.openTunnel(0, installResult.listeningOn);
+        this.tunnels.push(tunnelConfig);
+
+        return { localPort: tunnelConfig.localPort, connectionToken: installResult.connectionToken, envVariables };
     }
 
     private async openTunnel(localPort: number, remotePortOrSocketPath: number | string) {
@@ -795,147 +548,52 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
         return new TunnelInfo(localPort, remotePortOrSocketPath, disposables);
     }
 
-    private getSSHAuthHandler(sshUser: string, sshHostName: string, identityKeys: SSHKey[], preferredAuthentications: string[]) {
-        let passwordRetryCount = PASSWORD_RETRY_COUNT;
-        let keyboardRetryCount = PASSWORD_RETRY_COUNT;
-        identityKeys = identityKeys.slice();
-        return async (methodsLeft: string[] | null, _partialSuccess: boolean | null, callback: (nextAuth: ssh2.AuthHandlerResult) => void) => {
-            if (methodsLeft === null) {
-                this.logger.info(`Trying no-auth authentication`);
-
-                return callback({
-                    type: 'none',
-                    username: sshUser,
-                });
-            }
-            if (methodsLeft.includes('publickey') && identityKeys.length && preferredAuthentications.includes('publickey')) {
-                const identityKey = identityKeys.shift()!;
-
-                if (identityKey.parsedKey) {
-                    this.logger.info(`Trying publickey authentication: ${identityKey.filename} ${identityKey.parsedKey.type} SHA256:${identityKey.fingerprint}`);
-
-                    if (identityKey.agentSupport) {
-                        const { parsedKey } = identityKey;
-
-                        return callback({
-                            type: 'agent',
-                            username: sshUser,
-                            agent: new class extends ssh2.OpenSSHAgent {
-                                // Only return the current key
-                                override getIdentities(callback: (err: Error | undefined, publicKeys?: ParsedKey[]) => void): void {
-                                    callback(undefined, [parsedKey]);
-                                }
-                            }(this.sshAgentSock!)
-                        });
-                    }
-                    if (identityKey.isPrivate) {
-                        return callback({
-                            type: 'publickey',
-                            username: sshUser,
-                            key: identityKey.parsedKey
-                        });
-                    }
-                }
-
-                if (!await fileExists(identityKey.filename)) {
-                    // Try next identity file
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    return callback(null as any);
-                }
-
-                const keyBuffer = await fs.promises.readFile(identityKey.filename);
-                let result = ssh2.utils.parseKey(keyBuffer); // First try without passphrase
-                if (result instanceof Error && result.message.includes('but no passphrase given')) {
-                    let passphraseRetryCount = PASSPHRASE_RETRY_COUNT;
-                    while (result instanceof Error && passphraseRetryCount > 0) {
-                        const passphrase = await vscode.window.showInputBox({
-                            title: `Enter passphrase for ${identityKey.filename}`,
-                            password: true,
-                            ignoreFocusOut: true
-                        });
-                        if (!passphrase) {
-                            break;
-                        }
-                        result = ssh2.utils.parseKey(keyBuffer, passphrase);
-                        passphraseRetryCount--;
-                    }
-                }
-                if (!result || result instanceof Error) {
-                    // Try next identity file
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    return callback(null as any);
-                }
-
-                const key = Array.isArray(result) ? result[0] : result;
-                return callback({
-                    type: 'publickey',
-                    username: sshUser,
-                    key
-                });
-            }
-            if (methodsLeft.includes('password') && passwordRetryCount > 0 && preferredAuthentications.includes('password')) {
-                if (passwordRetryCount === PASSWORD_RETRY_COUNT) {
-                    this.logger.info(`Trying password authentication`);
-                }
-
-                const password = await vscode.window.showInputBox({
-                    title: `Enter password for ${sshUser}@${sshHostName}`,
-                    password: true,
-                    ignoreFocusOut: true
-                });
-                passwordRetryCount--;
-
-                return callback(password
-                    ? {
-                        type: 'password',
-                        username: sshUser,
-                        password
-                    }
-                    : false);
-            }
-            if (methodsLeft.includes('keyboard-interactive') && keyboardRetryCount > 0 && preferredAuthentications.includes('keyboard-interactive')) {
-                if (keyboardRetryCount === PASSWORD_RETRY_COUNT) {
-                    this.logger.info(`Trying keyboard-interactive authentication`);
-                }
-
-                return callback({
-                    type: 'keyboard-interactive',
-                    username: sshUser,
-                    prompt: async (_name, _instructions, _instructionsLang, prompts, finish) => {
-                        const responses: string[] = [];
-                        for (const prompt of prompts) {
-                            const response = await vscode.window.showInputBox({
-                                title: `(${sshUser}@${sshHostName}) ${prompt.prompt}`,
-                                password: !prompt.echo,
-                                ignoreFocusOut: true
-                            });
-                            if (response === undefined) {
-                                keyboardRetryCount = 0;
-                                break;
-                            }
-                            responses.push(response);
-                        }
-                        keyboardRetryCount--;
-                        finish(responses);
-                    }
-                });
-            }
-
-            callback(false);
-        };
-    }
-
     dispose() {
         disposeAll(this.tunnels);
         this.agentForwardSession?.close();
         this.agentForwardSession = undefined;
-        // If there's proxy connections then just close the parent connection
-        if (this.proxyConnections.length) {
-            this.proxyConnections[0].close();
+        if (this.openedConnection) {
+            this.openedConnection.dispose();
         } else {
             this.sshConnection?.close();
         }
-        this.proxyCommandProcess?.kill();
         this.labelFormatterDisposable?.dispose();
     }
+}
+
+/** The known_hosts related directives, which is all host key verification reads. */
+function pickKnownHostsConfig(hostConfig: HostConfiguration): HopPlan['knownHosts'] {
+    return {
+        UserKnownHostsFile: hostConfig['UserKnownHostsFile'],
+        GlobalKnownHostsFile: hostConfig['GlobalKnownHostsFile'],
+        HostKeyAlias: hostConfig['HostKeyAlias'],
+    };
+}
+
+function buildProxyCommand(proxyCommandValue: string | string[], proxyCommandValues: Record<string, string>): ProxyCommandPlan {
+    const proxyCommandLine = [proxyCommandValue].flat().join(' ');
+    const interpolateProxyCommand = (value: string) => SSHConfiguration.interpolate(value, proxyCommandValues);
+
+    // Like OpenSSH: the shell parses the whole line, quoting included.
+    let command = interpolateProxyCommand(proxyCommandLine);
+    let args: string[] = [];
+    let options: ProxyCommandPlan['options'] = { shell: true };
+    if (isWindows) {
+        // Like Win32-OpenSSH: no shell, except cmd.exe for batch
+        // files and program paths with a space.
+        args = splitProxyCommand(proxyCommandValue).map(interpolateProxyCommand);
+        command = args.shift()!;
+        options = {};
+        if (/\.(bat|cmd)$/.test(command) || command.includes(' ')) {
+            command = `"${command}"`;
+            args = args.map((arg) => arg.includes(' ') ? `"${arg}"` : arg);
+            options = { shell: true, windowsHide: true, windowsVerbatimArguments: true };
+        }
+    }
+
+    if (options.shell) {
+        assertShellSafeProxyCommand(proxyCommandLine, proxyCommandValues);
+    }
+
+    return { command, args, options };
 }

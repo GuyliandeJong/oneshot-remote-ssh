@@ -4,6 +4,13 @@ import { toString } from '../utils/to-string';
 
 type LogLevel = 'Trace' | 'Info' | 'Error';
 
+/**
+ * The logging surface the SSH code needs. Kept separate from `Log` so modules
+ * that also run in the background connection holder (which has no `vscode`
+ * API) can accept any logger, not just the output channel one.
+ */
+export type Logger = Pick<Log, 'trace' | 'info' | 'error'>;
+
 export class Log {
     private output: vscode.OutputChannel;
 

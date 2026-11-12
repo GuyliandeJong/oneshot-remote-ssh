@@ -232,7 +232,7 @@ export async function detectPlatform(conn: Pick<SSHClient, 'exec'>, platform: Re
 }
 
 export async function installCodeServer(
-    conn: SSHClient,
+    conn: Pick<SSHClient, 'exec' | 'execPartial'>,
     serverDownloadUrlTemplate: string | undefined,
     serverVersion: ServerVersion,
     extensionIds: string[],
@@ -280,7 +280,7 @@ export async function installCodeServer(
 }
 
 async function runInstallScript(
-    conn: SSHClient,
+    conn: Pick<SSHClient, 'exec' | 'execPartial'>,
     platform: string | undefined,
     shell: string,
     installOptions: ServerInstallOptions,
