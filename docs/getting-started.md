@@ -156,6 +156,10 @@ setup runs as a single command:
 
 Without these settings everything still works; it just costs four prompts instead of one.
 
+After the first connection, reloading the window, opening another folder or opening a second
+window to the same host costs no prompt at all: the extension keeps the SSH connection in the
+background for 10 minutes after the last window closes.
+
 ### Only if you use Code - OSS (not VSCodium)
 
 Code - OSS has no server build of its own, so use VSCodium's:
@@ -196,6 +200,7 @@ All connection details are in **Output** → choose **OneShot Remote SSH** in th
 |---|---|
 | Error mentioning *proposed API* | The `argv.json` entry is missing or the editor was not fully restarted. See step 3. |
 | Still several MFA prompts | `remotePlatform` / `remoteArch` keys don't match the host name you connected with. In the log, `Detected platform` and `Detected architecture` must have the same timestamp. |
+| A prompt after every window reload | The log should show `Reusing the background SSH connection`. If it says *The background SSH connection is not available*, the reason follows on the next lines. Check that `remote.SSH.persistentConnection` is not set to `false`. |
 | *Couldn't install vscode server … non-zero exit status* | Read the `Server install command stdout:` block above the error in the log; it names the failing step. |
 | *Downloaded tarball is corrupt or incomplete* | The download URL does not exist (GitHub "Not Found"). Code - OSS: add the settings from step 4. Check the `Found release for "latest"` line in the log. |
 | *No tool to download server binary* | Install `wget` or `curl` on the server. |

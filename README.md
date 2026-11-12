@@ -39,6 +39,9 @@ Port forwarding afterwards does not open session channels, so it does not trigge
   `github.com/VSCodium/vscodium/releases/latest` redirect, which is not subject to the
   60 requests/hour anonymous API limit. The API stays as a fallback, and API errors now show
   GitHub's message instead of `.map is not a function`.
+- **Background SSH connection**: window reloads, folder switches and extra windows reuse one
+  SSH connection instead of logging in again. See
+  [Reloads and extra windows](#reloads-and-extra-windows).
 - Own extension ID (`guyliandejong.oneshot-remote-ssh`), name, icon, command prefix
   (`OneShot SSH:`) and log channel (`OneShot Remote SSH`).
 
@@ -92,8 +95,21 @@ Add per host, using the host name exactly as you connect to it (`Host` alias fro
 Check the result in **Output -> OneShot Remote SSH**: `Detected platform` and
 `Detected architecture` appear at the same moment, and only the install script waits on MFA.
 
-A reconnect (for example after sleep) runs setup again and costs one prompt, the same as
-Microsoft's Remote-SSH.
+### Reloads and extra windows
+
+The SSH connection is kept in a small background process on your computer (setting
+`remote.SSH.persistentConnection`, on by default). Reloading the window, opening another
+folder or opening a second window to the same host reuses that connection and the running
+server, so it costs no new login and no MFA prompt. The log shows
+`Reusing the background SSH connection: no new SSH login`.
+
+The background connection closes 10 minutes after the last window using it is gone
+(`remote.SSH.persistentConnectionIdleTimeout`, in seconds), when the network connection drops,
+or on **OneShot SSH: Close Background SSH Connections**. After that, the next connection logs
+in again and costs one prompt; so does a reconnect after sleep.
+
+While it is open, any program running as your user on your computer can use it, the same as an
+OpenSSH `ControlMaster` socket. Turn the setting off if that matters to you.
 
 ## SSH Host Requirements
 You can connect to a running SSH server on the following platforms.

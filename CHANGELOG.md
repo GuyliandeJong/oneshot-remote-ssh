@@ -3,6 +3,17 @@ Changelog
 
 All notable changes to this project will be documented in this file.
 
+Unreleased
+----------
+
+### Added
+
+- background SSH connection (`remote.SSH.persistentConnection`, on by default): a window reload,
+  folder switch or second window to the same host reuses the SSH connection and the running
+  server, so it costs no new login (no MFA prompt). It closes after
+  `remote.SSH.persistentConnectionIdleTimeout` seconds without windows (default 600)
+- command **OneShot SSH: Close Background SSH Connections**
+
 [v1.0.0](https://github.com/GuyliandeJong/oneshot-remote-ssh/releases/tag/v1.0.0) | 2026-10-22
 --------------------------------------------------------------------------------------------
 
