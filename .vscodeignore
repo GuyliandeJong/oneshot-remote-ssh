@@ -7,5 +7,6 @@
 !THIRD_PARTY_NOTICES.md
 !README.md
 !lib/extension.js
+!lib/holder.js
 !resources/icon.png
 !src/scripts/**

@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { Log } from './common/logger';
 import { RemoteSSHResolver, REMOTE_SSH_AUTHORITY } from './authResolver';
-import { openSSHConfigFile, promptOpenRemoteSSHWindow } from './commands';
+import { closeBackgroundConnections, openSSHConfigFile, promptOpenRemoteSSHWindow } from './commands';
 import { HostTreeDataProvider } from './hostTreeView';
 import { getRemoteWorkspaceLocationData, RemoteLocationHistory } from './remoteLocationHistory';
 
@@ -27,6 +27,7 @@ export async function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(vscode.commands.registerCommand('oneshotssh.openEmptyWindowInCurrentWindow', () => promptOpenRemoteSSHWindow(true)));
     context.subscriptions.push(vscode.commands.registerCommand('oneshotssh.openConfigFile', () => openSSHConfigFile()));
     context.subscriptions.push(vscode.commands.registerCommand('oneshotssh.showLog', () => logger.show()));
+    context.subscriptions.push(vscode.commands.registerCommand('oneshotssh.closeBackgroundConnections', () => closeBackgroundConnections(logger)));
 }
 
 export function deactivate() {

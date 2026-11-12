@@ -4,6 +4,9 @@ import { getRemoteAuthority } from './authResolver';
 import SSHConfiguration, { getSSHConfigPath } from './ssh/sshConfig';
 import { exists as fileExists } from './common/files';
 import SSHDestination from './ssh/sshDestination';
+import type { Log } from './common/logger';
+import { HolderClient } from './holder/client';
+import { getHolderDir } from './holder/shared';
 
 export async function promptOpenRemoteSSHWindow(reuseWindow: boolean) {
     const host = await promptForHost();
@@ -109,4 +112,11 @@ export async function openSSHConfigFile() {
         await fs.promises.appendFile(sshConfigPath, '');
     }
     vscode.commands.executeCommand('vscode.open', vscode.Uri.file(sshConfigPath));
+}
+
+export async function closeBackgroundConnections(logger: Log) {
+    const count = await HolderClient.shutdownAll(getHolderDir(), logger);
+    vscode.window.showInformationMessage(count
+        ? `Closed ${count} background SSH connection(s). Windows still using one are disconnected; the next connection logs in again.`
+        : 'No background SSH connections are open.');
 }

@@ -1,6 +1,8 @@
 import type { ServerVersion } from './server-config/types';
 
+import * as crypto from 'crypto';
 import * as net from 'net';
+import * as path from 'path';
 import { SocksClient, SocksClientOptions } from 'socks';
 import * as vscode from 'vscode';
 import { Log } from './common/logger';
@@ -14,6 +16,9 @@ import { untildify } from './common/files';
 import { findRandomPort } from './common/ports';
 import { disposeAll } from './common/disposable';
 import { installCodeServer, ServerInstallError, findServerInstallPath, type ServerInstallResult } from './serverSetup';
+import { getServerConfig } from './server-config/get-server-config';
+import { HolderClient } from './holder/client';
+import { getHolderDir, getHolderKey } from './holder/shared';
 import type { RemotePlatform } from './types';
 import { isWindows } from './common/platform';
 import * as os from 'os';
@@ -195,6 +200,9 @@ export function resolveProxyJumps(
     return hops;
 }
 
+/** SSH keepalive for connections kept by the background holder, so a dead link is noticed. */
+const HOLDER_KEEPALIVE_INTERVAL = 15 * 1000;
+
 /** Where the window reaches the remote server, and what its extension host needs. */
 interface ResolvedServer {
     localPort: number;
@@ -210,6 +218,7 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
     private sshConnection: SSHClient | undefined;
     private sshAgentSock: string | undefined;
     private agentForwardSession: SSHExecChannel | undefined;
+    private holderClient: HolderClient | undefined;
 
     private socksTunnel: SSHTunnelConfig | undefined;
     private tunnels: TunnelInfo[] = [];
@@ -253,6 +262,8 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
         const serverInstallPathMap = remoteSSHconfig.get<Record<string, string>>('serverInstallPath', {});
         const verifyUnknownHosts = remoteSSHconfig.get<HostVerificationPolicy>('verifyUnknownHosts', 'ask')!;
         const verifyKnownHosts = remoteSSHconfig.get<HostVerificationPolicy>('verifyKnownHosts', 'reject')!;
+        const persistentConnection = remoteSSHconfig.get<boolean>('persistentConnection', true)!;
+        const persistentConnectionIdleTimeout = remoteSSHconfig.get<number>('persistentConnectionIdleTimeout', 600)!;
 
         return vscode.window.withProgress({
             title: `Setting up SSH Host ${sshDest.hostname}`,
@@ -345,7 +356,7 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
                         preferredAuthentications: sshHostConfig['PreferredAuthentications'] ? sshHostConfig['PreferredAuthentications'].split(',').map(s => s.trim()) : ['publickey', 'password', 'keyboard-interactive'],
                         agentSock: this.sshAgentSock,
                         connectTimeout,
-                        keepaliveInterval: 0,
+                        keepaliveInterval: persistentConnection ? HOLDER_KEEPALIVE_INTERVAL : 0,
                         verifyUnknownHosts,
                         verifyKnownHosts,
                     };
@@ -372,6 +383,11 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
                             'p': sshPort.toString(),
                             'r': sshUser,
                         });
+                    }
+
+                    if (persistentConnection) {
+                        const setupKey = await getSetupKey({ serverDownloadUrlTemplate, serverVersion, defaultExtensions, sendEnvVars, remoteServerListenOnSocket, customInstallPath, platform: remotePlatformMap[sshDest.hostname], arch: remoteArchMap[sshDest.hostname] });
+                        resolved = await this.resolveWithHolder(plan, setupKey, persistentConnectionIdleTimeout, installServer);
                     }
 
                     if (!resolved) {
@@ -444,6 +460,68 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
                 }
             }
         });
+    }
+
+    /**
+     * Connect through the background holder, which keeps the SSH connection,
+     * the server it set up and the tunnel to it across window reloads. A
+     * window attaching to a holder that already has all three costs no new
+     * SSH session on the remote. Returns undefined when the holder can't be
+     * used, so the caller connects from this window instead.
+     */
+    private async resolveWithHolder(plan: ConnectPlan, setupKey: string, idleTimeout: number, installServer: InstallServer): Promise<ResolvedServer | undefined> {
+        for (let attempt = 1; ; attempt++) {
+            let client: HolderClient;
+            try {
+                this.holderClient?.close();
+                client = await HolderClient.attach({
+                    dir: getHolderDir(),
+                    key: getHolderKey(plan, this.context.extension?.packageJSON?.version ?? ''),
+                    holderScript: path.join(this.context.extensionPath, 'lib', 'holder.js'),
+                    idleTimeout,
+                    logger: this.logger,
+                });
+            } catch (e) {
+                this.logger.error('The background SSH connection is not available; connecting from this window instead', e);
+                return undefined;
+            }
+            this.holderClient = client;
+
+            try {
+                return await this.setupWithHolder(client, plan, setupKey, installServer);
+            } catch (e) {
+                // The holder shuts down when its SSH connection is found dead
+                // (e.g. after sleep); start over once with a fresh one
+                if (client.isClosed && attempt === 1) {
+                    this.logger.info(`The background SSH connection went away (${e instanceof Error ? e.message : e}); opening a new one`);
+                    continue;
+                }
+                throw e;
+            }
+        }
+    }
+
+    private async setupWithHolder(client: HolderClient, plan: ConnectPlan, setupKey: string, installServer: InstallServer): Promise<ResolvedServer> {
+        const { reused, agentSock } = await client.connect(plan, this.connectionUI);
+        if (reused) {
+            this.logger.info('Reusing the background SSH connection: no new SSH login');
+        }
+
+        let session = await client.getSession(setupKey);
+        if (session) {
+            this.logger.info(`Reusing the remote server listening on ${session.listeningOn}`);
+        } else {
+            const installResult = await installServer(client.exec);
+            const envVariables: Record<string, string> = {};
+            if (agentSock) {
+                envVariables['SSH_AUTH_SOCK'] = agentSock;
+            }
+            session = { setupKey, listeningOn: installResult.listeningOn, connectionToken: installResult.connectionToken, envVariables };
+            await client.setSession(session);
+        }
+
+        const localPort = await client.openTunnel(session.listeningOn);
+        return { localPort, connectionToken: session.connectionToken, envVariables: session.envVariables };
     }
 
     /** Set up the server over the connection this window opened itself. */
@@ -557,6 +635,8 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
         } else {
             this.sshConnection?.close();
         }
+        // Detach only: the holder keeps the connection for the next window
+        this.holderClient?.close();
         this.labelFormatterDisposable?.dispose();
     }
 }
@@ -596,4 +676,14 @@ function buildProxyCommand(proxyCommandValue: string | string[], proxyCommandVal
     }
 
     return { command, args, options };
+}
+
+/**
+ * Identifies what the remote server was set up for: the client build and the
+ * settings that shape the install. A window reuses a server the holder set up
+ * only when this matches.
+ */
+async function getSetupKey(settings: Record<string, unknown>): Promise<string> {
+    const serverConfig = await getServerConfig();
+    return crypto.createHash('sha256').update(JSON.stringify({ serverConfig, settings })).digest('hex');
 }

@@ -102,6 +102,7 @@
 		"onCommand:oneshotssh.openEmptyWindowInCurrentWindow",
 		"onCommand:oneshotssh.openConfigFile",
 		"onCommand:oneshotssh.showLog",
+		"onCommand:oneshotssh.closeBackgroundConnections",
 		"onResolveRemoteAuthority:ssh-remote",
 		"onView:sshHosts"
 	],
@@ -121,6 +122,19 @@
 					"default": 60,
 					"scope": "application",
 					"minimum": 1
+				},
+				"remote.SSH.persistentConnection": {
+					"type": "boolean",
+					"markdownDescription": "Keep the SSH connection in a background process, so that reloading a window, opening a different folder or opening another window to the same host reuses it instead of logging in again. Each new SSH login can mean another MFA prompt (e.g. a Duo push from `ForceCommand login_duo`). Not used for hosts that need GSSAPI authentication.",
+					"default": true,
+					"scope": "application"
+				},
+				"remote.SSH.persistentConnectionIdleTimeout": {
+					"type": "number",
+					"markdownDescription": "How long, in seconds, the background SSH connection stays open once no window uses it. Applies when `#remote.SSH.persistentConnection#` is enabled.",
+					"default": 600,
+					"minimum": 10,
+					"scope": "application"
 				},
 				"remote.SSH.verifyUnknownHosts": {
 					"type": "string",
@@ -275,6 +289,11 @@
 			{
 				"command": "oneshotssh.showLog",
 				"title": "Show Log",
+				"category": "OneShot SSH"
+			},
+			{
+				"command": "oneshotssh.closeBackgroundConnections",
+				"title": "Close Background SSH Connections",
 				"category": "OneShot SSH"
 			},
 			{

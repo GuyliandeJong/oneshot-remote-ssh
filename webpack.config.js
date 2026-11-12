@@ -8,10 +8,15 @@ const webpack = require('webpack');
 /**@type {import('webpack').Configuration}*/
 const config = {
     target: 'node',
-    entry: './src/extension.ts',
+    entry: {
+        extension: './src/extension.ts',
+        // The background connection holder: runs outside the extension host,
+        // so nothing it imports may depend on the `vscode` API.
+        holder: './src/holder/main.ts',
+    },
     output: {
         path: path.resolve(__dirname, 'lib'),
-        filename: 'extension.js',
+        filename: '[name].js',
         libraryTarget: "commonjs2",
         devtoolModuleFilenameTemplate: "../[resource-path]",
     },

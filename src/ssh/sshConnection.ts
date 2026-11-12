@@ -187,6 +187,22 @@ export default class SSHConnection extends EventEmitter {
     }
 
     /**
+     * Forward out to a Unix socket on the remote
+     */
+    forwardOutStreamLocal(socketPath: string): Promise<ClientChannel> {
+        return this.connect().then(() => {
+            return new Promise((resolve, reject) => {
+                this.sshConnection!.openssh_forwardOutStreamLocal(socketPath, (err, stream) => {
+                    if (err) {
+                        return reject(err);
+                    }
+                    resolve(stream);
+                });
+            });
+        });
+    }
+
+    /**
      * Get a Socks Port
      */
     getSocksPort(localPort: number): Promise<number> {
