@@ -10,6 +10,23 @@ import socks from 'simple-socks';
 import type { DestinationInfo, OriginInfo, ConnectionOptionsCallback } from 'simple-socks';
 import { isString } from '@zokugun/is-it-type';
 
+/**
+ * Pipe a tunnel client socket to its SSH channel and tie their lifetimes together.
+ * `pipe()` forwards neither errors nor closes: without these listeners a reset from
+ * one side (ECONNRESET, common on Windows when a window closes) is an uncaught
+ * 'error' event that takes the whole background holder down.
+ */
+export function bridgeStreams(socket: net.Socket, stream: NodeJS.ReadWriteStream & { destroy(): unknown }): void {
+    stream.pipe(socket);
+    socket.pipe(stream);
+
+    socket.once('close', () => stream.destroy());
+    stream.once('close', () => socket.destroy());
+    // destroy() emits 'close', which tears down the other side
+    socket.on('error', () => socket.destroy());
+    stream.on('error', () => socket.destroy());
+}
+
 export interface SSHConnectConfig extends ConnectConfig {
     /** Optional Unique ID attached to ssh connection. */
     uniqueId?: string;
@@ -320,27 +337,30 @@ export default class SSHConnection extends EventEmitter {
                 } else {
                     server = net.createServer()
                         .on('connection', (socket) => {
+                            // Needed before the channel exists too: the client can reset while we are still connecting
+                            socket.on('error', () => socket.destroy());
+
                             this.connect().then(() => {
                                 if (SSHTunnelConfig.remotePort) {
                                     this.sshConnection!.forwardOut('127.0.0.1', 0, SSHTunnelConfig.remoteAddr!, SSHTunnelConfig.remotePort!, (err, stream) => {
                                         if (err) {
                                             this.emit(SSHConstants.CHANNEL.TUNNEL, SSHConstants.STATUS.DISCONNECT, { SSHTunnelConfig: SSHTunnelConfig, err: err });
+                                            socket.destroy();
                                             return;
                                         }
-                                        stream.pipe(socket);
-                                        socket.pipe(stream);
+                                        bridgeStreams(socket, stream);
                                     });
                                 } else {
                                     this.sshConnection!.openssh_forwardOutStreamLocal(SSHTunnelConfig.remoteSocketPath!, (err, stream) => {
                                         if (err) {
                                             this.emit(SSHConstants.CHANNEL.TUNNEL, SSHConstants.STATUS.DISCONNECT, { SSHTunnelConfig: SSHTunnelConfig, err: err });
+                                            socket.destroy();
                                             return;
                                         }
-                                        stream.pipe(socket);
-                                        socket.pipe(stream);
+                                        bridgeStreams(socket, stream);
                                     });
                                 }
-                            });
+                            }).catch(() => socket.destroy());
                         });
                 }
 
