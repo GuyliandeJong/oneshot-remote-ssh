@@ -3,6 +3,15 @@ Changelog
 
 All notable changes to this project will be documented in this file.
 
+[v1.1.1](https://github.com/GuyliandeJong/oneshot-remote-ssh/releases/tag/v1.1.1) | 2026-11-13
+----------------------------------------------------------------------------------------------
+
+### Fixed
+
+- the background SSH connection no longer shuts down with `Uncaught exception: read ECONNRESET`
+  when a local tunnel connection is reset; only that connection is closed
+- a tunnel connection whose SSH channel could not be opened is now closed instead of left hanging
+
 [v1.1.0](https://github.com/GuyliandeJong/oneshot-remote-ssh/releases/tag/v1.1.0) | 2026-11-12
 ----------------------------------------------------------------------------------------------
 

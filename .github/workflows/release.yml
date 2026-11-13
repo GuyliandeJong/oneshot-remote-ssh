@@ -66,7 +66,7 @@ jobs:
       - name: Unit tests
         if: steps.exists.outputs.skip == 'false'
         run: |
-          npx vitest run test/detect-platform.test.ts test/fetch-release.test.ts test/holder.test.ts
+          npx vitest run test/detect-platform.test.ts test/fetch-release.test.ts test/holder.test.ts test/bridge-streams.test.ts
 
       - name: Package VSIX
         if: steps.exists.outputs.skip == 'false'

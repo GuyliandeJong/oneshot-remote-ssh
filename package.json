@@ -2,7 +2,7 @@
 	"name": "oneshot-remote-ssh",
 	"displayName": "OneShot Remote SSH",
 	"description": "Remote development over SSH that runs server setup in a single SSH command: one MFA prompt (e.g. Duo login_duo) per connection. Fork of Open Remote - SSH.",
-	"version": "1.1.0",
+	"version": "1.1.1",
 	"publisher": "guyliandejong",
 	"author": {
 		"name": "Guylian de Jong"
